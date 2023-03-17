@@ -5,11 +5,25 @@ def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tupl
     from itertools import combinations
     from sklearn.model_selection import cross_val_score
     from math import comb
+
     """Tool to test all of possible combinations features list_vars
     WARNING: THIS IS A VERY SLOW PROCESS, USE IT ONLY FOR SMALL DATASETS
     ABOUT 5 MINUTES FOR 1200 COMBINATIONS IN A RECENT CPU
     
     By Helder Fraga helderfraga@gmail.com
+    
+    Example of use:
+    from Utils import bestFeatures
+
+    X = data.read_csv('data.csv')
+    X = X.drop('target',axis=1)
+    y = data['target']
+
+    model = RandomForestClassifier(n_estimators=100, max_depth=2, random_state=0,class_weight='balanced')
+    skf = KFold(n_splits=5, random_state=42, shuffle=True)
+
+    max_score, max_vars, max_nr,score,cols = bestFeatures (X, y, skf, model, 5, scoring='recall')
+
     
     data is a dataframe
     target is a series
