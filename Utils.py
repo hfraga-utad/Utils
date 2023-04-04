@@ -69,3 +69,59 @@ def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tupl
                 max_nr = nr
                 print (max_score, max_vars, max_nr)
     return (max_score, max_vars, max_nr,score,cols)
+
+
+
+
+from imblearn.under_sampling import RandomUnderSampler
+
+class StratifiedRandomUnderSampler():
+    
+    def __init__(self,df,X_name,y_name,groupvar_name,sampling_strategy='auto',
+                 return_indices=False,random_state=None,replacement=False,ratio=None):
+        
+        self.df = df
+        self.X_name = X_name
+        self.y_name = y_name
+        self.groupvar_name = groupvar_name
+        self.sampling_strategy = sampling_strategy
+        self.return_indices = return_indices
+        self.random_state = random_state
+        self.replacement = replacement
+        self.ratio = ratio
+        
+    def resample(self):
+        self.df_res_ = self.df.groupby(self.groupvar_name).apply(self._random_undersample,
+                                  X_name=self.X_name,
+                                  y_name=self.y_name
+                                  )
+        
+        self.df_res_.set_index(self.df_res_.index.get_level_values(1),inplace=True)
+        
+        self.X_ = self.df_res_[self.X_name]
+        self.y_ = self.df_res_[self.y_name]
+        
+        return self.X_, self.y_, self.df_res_
+        
+    def _random_undersample(self,group_df,X_name,y_name):
+        # resampling is only possible when there is more than one class label
+        # NOTE: this means that groups which contain samples with only one class
+        # label will be dropped.
+        if group_df[y_name].nunique() > 1:
+            
+            # convert feature column into (n_samples,1) dimensional numpy array
+            # NOTE: this reshaping is required by imblearn when dealing with one
+            # dimensional feature matrices.
+            X = group_df[X_name].values.reshape(-1,1)
+            
+            rus = RandomUnderSampler(sampling_strategy=self.sampling_strategy,
+                                     return_indices=self.return_indices,
+                                     random_state=self.random_state,
+                                     replacement=self.replacement,
+                                     ratio=self.ratio)
+    
+            rus.fit_resample(X,group_df[y_name])
+            
+            indices = rus.sample_indices_
+            
+            return group_df.iloc[indices]
