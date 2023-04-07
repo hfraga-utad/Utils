@@ -71,6 +71,60 @@ def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tupl
     return (max_score, max_vars, max_nr,score,cols)
 
 
+from itertools import combinations
+from math import comb
+from typing import Tuple, List
+from sklearn.model_selection import cross_val_score
+import pandas as pd
+import numpy as np
+import multiprocessing
+
+def calculate_score(model, combo, X, target, crossval, scoring):
+    scores = cross_val_score(model, X[list(combo)], target, cv=crossval, scoring=scoring)
+    r2 = scores.mean()
+    return (r2, combo, X.columns)
+
+def bestFeatures_parallel(data: pd.DataFrame, target: pd.Series, crossval, model, n_features: int = 5, scoring: str = 'r2') -> Tuple[float, List[str], int, List[float], List[List[str]]]:
+    
+    print('starting')
+    max_score = 0
+    score = []
+    cols = []
+    max_vars = []
+    nr = 0
+    list_vars = data.columns.tolist()
+    print(comb(len(list_vars), n_features), 'combinations')
+    
+    t = (comb(len(list_vars), n_features)*5)/1200
+    t = t/60
+    print('Estimated time: ', round(t), 'hours')
+    
+    # create a list of all possible combinations
+    combos = list(combinations(list_vars, n_features))
+    
+    # create a pool of worker processes
+    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+    
+    # map the calculation of each score to the worker processes
+    results = [pool.apply_async(calculate_score, args=(model, combo, data, target, crossval, scoring)) for combo in combos]
+    
+    # get the results and update the maximum score
+    for r in results:
+        nr += 1
+        r2, combo, cols_combo = r.get()
+        score.append(r2)
+        cols.append(cols_combo)
+        if r2 > max_score:
+            max_score = r2
+            max_vars = combo
+            max_nr = nr
+            print(max_score, max_vars, max_nr)
+            
+    pool.close()
+    pool.join()
+    
+    return (max_score, max_vars, max_nr, score, cols)
+
 
 
 from imblearn.under_sampling import RandomUnderSampler
