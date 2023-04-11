@@ -1,7 +1,141 @@
-from typing import Tuple
+from itertools import combinations
+from math import comb
+from typing import Tuple, List
+from sklearn.model_selection import cross_val_score, KFold
+import pandas as pd
+import numpy as np
+import multiprocessing
+
+def calculate_score(model, combo, X, target, crossval, scoring):
+    scores = cross_val_score(model, X[list(combo)], target, cv=crossval, scoring=scoring)
+    r2 = scores.mean()
+    return (r2, combo, X.columns)
+
+### THIS IS THE FASTEST METHOD###
+def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_features: int = 5, scoring: str = 'r2', n_jobs: int = None) -> Tuple[float, List[str], int, List[float], List[List[str]]]:
+    """Tool to test all of possible combinations features list_vars
+    WARNING: THIS IS A VERY SLOW PROCESS, USE IT ONLY FOR SMALL DATASETS
+    
+    
+    By Helder Fraga helderfraga@gmail.com
+    
+    Example of use:
+    from Utils import bestFeatures
+
+    X = data.read_csv('data.csv')
+    X = X.drop('target',axis=1)
+    y = data['target']
+
+    model = RandomForestClassifier(random_state=42)
+    skf = KFold(n_splits=5, random_state=42, shuffle=True)
+
+    max_score, max_vars, max_nr,score,cols = bestFeatures (X, y, skf, model, 5, scoring='recall', n_jobs=4)
+
+    
+    data are the dataframe with the features
+    target is a series
+    crossval is a cross validation method
+    model is a model
+    n_features is a number for the number features to be combined
+    
+    example data:
+    data = pd.read_csv('data.csv')
+    target = data['target']   
+    crossval = KFold(n_splits=5,shuffle=True,random_state=42)
+    model = RandomForestRegressor(n_estimators=100,random_state=42)
+    n_features = 10
+    n_jobs = -1
+    
+
+    """
+    print('starting')
+    max_score = 0
+    score = []
+    cols = []
+    max_vars = []
+    nr = 0
+    list_vars = data.columns.tolist()
+    print(comb(len(list_vars), n_features), 'combinations')
+
+    
+    # create a list of all possible combinations
+    combos = list(combinations(list_vars, n_features))
+
+    if n_jobs == -1:
+        n_jobs = multiprocessing.cpu_count()-1
+    if n_jobs == 0:
+        n_jobs = 1
+    else:
+        n_jobs = n_jobs     
+
+    # create a pool of worker processes
+    pool = multiprocessing.Pool(processes=n_jobs)
+    
+    # map the calculation of each score to the worker processes
+    results = [pool.apply_async(calculate_score, args=(model, combo, data, target, crossval, scoring)) for combo in combos]
+    
+    # get the results and update the maximum score
+    for r in results:
+        nr += 1
+        r2, combo, cols_combo = r.get()
+        score.append(r2)
+        cols.append(cols_combo)
+        #print(nr)
+
+        if r2 > max_score:
+            max_score = r2
+            max_vars = combo
+            max_nr = nr
+            print(max_score, max_vars, max_nr, model.__class__.__name__)
+
+    pool.close()
+    pool.join()
+    
+    return (max_score, max_vars, max_nr, score, cols)
 
 
-def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tuple[int, list, int, list,list]:
+
+
+def calc_score(idx: List[int], X, target, model, crossval, scoring):
+    X_subset = X.iloc[:, idx]
+    scores = cross_val_score(model, X_subset, target, cv=crossval, scoring=scoring)
+    return scores.mean()
+
+### THIS IS THE SLOWEST METHOD###
+def bestFeatures_parallel_slower(data: pd.DataFrame, target: pd.Series, crossval: KFold, model, n_features: int = 5, scoring: str = 'r2', n_jobs: int = 4) -> Tuple[int, List[str], int, List[float], List[List[str]]]:
+    print('starting')
+    max_score = 0
+    score = []
+    cols = []
+    max_vars = []
+    nr = 0
+    list_vars = data.columns.tolist()
+    print(comb(len(list_vars), n_features), 'combinations')
+
+
+    with multiprocessing.Pool(n_jobs) as p:
+        results = []
+        for i in range(n_features, n_features + 1):
+            for combo in combinations(list_vars, i):
+                nr += 1
+                cols.append(combo)
+                idx_list = [data.columns.get_loc(c) for c in combo]
+                results.append(p.apply_async(calc_score, (idx_list, data, target, model, crossval, scoring)))
+        for r in results:
+            r.wait()
+            r_value = r.get()
+            score.append(r_value)
+            if r_value > max_score:
+                max_score = r_value
+                max_vars = cols[results.index(r)]
+                max_nr = nr
+                print(max_score, max_vars, max_nr)
+
+    return max_score, list(max_vars), max_nr, score, cols
+
+
+### OLD METHOD ###
+def bestFeatures_old (data, target,crossval,model,n_features=5,scoring='r2') -> Tuple[int, list, int, list,list]:
     from itertools import combinations
     from sklearn.model_selection import cross_val_score
     from math import comb
@@ -47,6 +181,8 @@ def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tupl
     max_score = 0
     score = []
     cols = []
+    max_vars = []
+    max_nr = 0
     nr = 0
     list_vars = data.columns.tolist()
     print (comb(len(list_vars), n_features), 'combinations')
@@ -69,61 +205,6 @@ def bestFeatures (data, target,crossval,model,n_features=5,scoring='r2') -> Tupl
                 max_nr = nr
                 print (max_score, max_vars, max_nr)
     return (max_score, max_vars, max_nr,score,cols)
-
-
-from itertools import combinations
-from math import comb
-from typing import Tuple, List
-from sklearn.model_selection import cross_val_score
-import pandas as pd
-import numpy as np
-import multiprocessing
-
-def calculate_score(model, combo, X, target, crossval, scoring):
-    scores = cross_val_score(model, X[list(combo)], target, cv=crossval, scoring=scoring)
-    r2 = scores.mean()
-    return (r2, combo, X.columns)
-
-def bestFeatures_parallel(data: pd.DataFrame, target: pd.Series, crossval, model, n_features: int = 5, scoring: str = 'r2') -> Tuple[float, List[str], int, List[float], List[List[str]]]:
-    
-    print('starting')
-    max_score = 0
-    score = []
-    cols = []
-    max_vars = []
-    nr = 0
-    list_vars = data.columns.tolist()
-    print(comb(len(list_vars), n_features), 'combinations')
-    
-    t = (comb(len(list_vars), n_features)*5)/1200
-    t = t/60
-    print('Estimated time: ', round(t), 'hours')
-    
-    # create a list of all possible combinations
-    combos = list(combinations(list_vars, n_features))
-    
-    # create a pool of worker processes
-    pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
-    
-    # map the calculation of each score to the worker processes
-    results = [pool.apply_async(calculate_score, args=(model, combo, data, target, crossval, scoring)) for combo in combos]
-    
-    # get the results and update the maximum score
-    for r in results:
-        nr += 1
-        r2, combo, cols_combo = r.get()
-        score.append(r2)
-        cols.append(cols_combo)
-        if r2 > max_score:
-            max_score = r2
-            max_vars = combo
-            max_nr = nr
-            print(max_score, max_vars, max_nr)
-            
-    pool.close()
-    pool.join()
-    
-    return (max_score, max_vars, max_nr, score, cols)
 
 
 
