@@ -6,13 +6,32 @@ import pandas as pd
 import numpy as np
 import multiprocessing
 
+
+from sklearn.model_selection import BaseCrossValidator
+
+class RollingWindowCV(BaseCrossValidator):
+    def __init__(self, window_size, test_size_percent):
+        self.window_size = window_size
+        self.test_size_percent = test_size_percent
+
+    def split(self, X, y=None, groups=None):
+        n = len(X)
+        test_size = int(np.ceil(self.test_size_percent * self.window_size))
+        for i in range(n - self.window_size - test_size +1):
+            train_index = np.arange(i, i + self.window_size)
+            test_index = np.arange(i + self.window_size, i + self.window_size + test_size)
+            yield train_index, test_index
+
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return None
+
 def calculate_score(model, combo, X, target, crossval, scoring):
     scores = cross_val_score(model, X[list(combo)], target, cv=crossval, scoring=scoring)
     r2 = scores.mean()
     return (r2, combo, X.columns)
 
 ### THIS IS THE FASTEST METHOD###
-def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_features: int = 5, scoring: str = 'r2', n_jobs: int = None) -> Tuple[float, List[str], int, List[float], List[List[str]]]:
+def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_features: int = 5, scoring: str = 'r2', n_jobs: int = None, keep = None, start: int = 1, verbose = False) -> Tuple[float, List[str], int, List[float], List[List[str]]]:
     """Tool to test all of possible combinations features list_vars
     WARNING: THIS IS A VERY SLOW PROCESS, USE IT ONLY FOR SMALL DATASETS
     
@@ -48,18 +67,26 @@ def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_featu
     
 
     """
-    print('starting')
+    print('starting: ' + scoring)    
     max_score = 0
     score = []
     cols = []
     max_vars = []
     nr = 0
     list_vars = data.columns.tolist()
-    print(comb(len(list_vars), n_features), 'combinations')
-
+    
+    print('Total Features: ',len(list_vars), ' - Selected Features: ' ,n_features, ' - Combinations: ',  comb(len(list_vars), n_features))
+    
     
     # create a list of all possible combinations
+
+    if keep is not None:
+        list_vars = [x for x in list_vars if x not in keep]
     combos = list(combinations(list_vars, n_features))
+
+    # for every combo in combos add the keep variables
+    if keep is not None:
+        combos = [list(x) + keep for x in combos]
 
     if n_jobs == -1:
         n_jobs = multiprocessing.cpu_count()-1
@@ -67,6 +94,33 @@ def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_featu
         n_jobs = 1
     else:
         n_jobs = n_jobs     
+
+
+    # if start > 1, skip the first start-1 combinations
+    if start > 1:
+        combos = combos[start-1:]
+        
+    
+    #get first combination
+    combo = combos[0]
+    #set timer 
+    import time
+    start = time.time_ns()
+    a = cross_val_score(model, data[list(combo)], target, cv=crossval, scoring=scoring)
+    end = time.time_ns()  
+    # calculate time used for first combination * number of combinations
+    t = (end-start)
+
+    t = t*len(combos)
+    # convert to minutes
+    t = t/60000000000
+    # calculate loss of time
+    loss = 2
+    t = (t/n_jobs)*loss
+
+
+    print ('Estimated time: >', round(t), 'minutes -', 'Using ', n_jobs, ' cores')
+
 
     # create a pool of worker processes
     pool = multiprocessing.Pool(processes=n_jobs)
@@ -77,10 +131,18 @@ def bestFeatures(data: pd.DataFrame, target: pd.Series, crossval, model, n_featu
     # get the results and update the maximum score
     for r in results:
         nr += 1
+        
         r2, combo, cols_combo = r.get()
+        # except:
+        #     r2 = 0
+        #     combo = []
+        #     cols_combo = []
+            # print ('error')
+            
         score.append(r2)
         cols.append(cols_combo)
-        #print(nr)
+        if verbose:
+            print(r2)
 
         if r2 > max_score:
             max_score = r2
@@ -260,3 +322,17 @@ class StratifiedRandomUnderSampler():
             indices = rus.sample_indices_
             
             return group_df.iloc[indices]
+        
+
+
+
+
+def smooth_plot(x1: list, y1: list, kind : int = 2) -> Tuple[list, list]:
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import interp1d
+
+    fun = interp1d(x=x1, y=y1, kind=kind)
+    x2 = np.linspace(start=0, stop=4, num=1000)
+    y2 = fun(x2)
+    return x2, y2
